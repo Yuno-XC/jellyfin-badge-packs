@@ -1,0 +1,262 @@
+From cbdfe8fef4067dd459c794f3362866eca2744bf7 Mon Sep 17 00:00:00 2001
+From: Yuno <Challa.somesh@gmail.com>
+Date: Tue, 20 Oct 2026 01:52:20 +0530
+Subject: [PATCH 2/3] feat: save badge pack URLs from configure
+
+Users can add pack URLs under Miscellaneous. Saved URLs are merged into
+System/Info defaultBadgePacks for Jellyfin clients.
+---
+ packages/core/src/db/schemas.ts               |   2 +
+ packages/core/src/utils/fieldMeta.ts          |   9 ++
+ .../miscellaneous/_components/badge-packs.tsx | 110 ++++++++++++++++++
+ .../components/menu/miscellaneous/index.tsx   |   8 ++
+ packages/server/src/routes/api/user.ts        |  54 +++++++++
+ 5 files changed, 183 insertions(+)
+ create mode 100644 packages/frontend/src/components/menu/miscellaneous/_components/badge-packs.tsx
+
+diff --git a/packages/core/src/db/schemas.ts b/packages/core/src/db/schemas.ts
+index 4ea232db..e7577719 100644
+--- a/packages/core/src/db/schemas.ts
++++ b/packages/core/src/db/schemas.ts
+@@ -1044,6 +1044,8 @@ export const UserDataSchema = z.object({
+   usePosterRedirectApi: z.boolean().optional(),
+   usePosterServiceForMeta: z.boolean().optional(),
+   formatter: Formatter,
++  /** Badge-pack JSON URLs imported on the configure page (not used by Stremio). */
++  badgePackUrls: z.array(z.string().url()).optional(),
+   proxy: StreamProxyConfig.optional(),
+   resultLimits: ResultLimitOptions.optional(),
+   size: SizeFilterOptions.optional(),
+diff --git a/packages/core/src/utils/fieldMeta.ts b/packages/core/src/utils/fieldMeta.ts
+index 29cfa359..c7c7b584 100644
+--- a/packages/core/src/utils/fieldMeta.ts
++++ b/packages/core/src/utils/fieldMeta.ts
+@@ -208,6 +208,15 @@ export const FIELD_META: Omit<Record<keyof UserData, FieldMeta>, IgnoredKeys> =
+   resultLimits: { label: 'Result Limits', group: 'sorting', type: 'scalar', menu: 'filters', subTab: 'limit' },
+ 
+   formatter: { label: 'Formatter', group: 'formatter', type: 'scalar', menu: 'formatter' },
++  badgePackUrls: {
++    label: 'Badge Pack URLs',
++    group: 'misc',
++    type: 'list',
++    menu: 'miscellaneous',
++    subTab: 'badges',
++    sectionId: 'badgePackUrls',
++    keywords: ['badge', 'logo', 'pack', 'nuvio', 'fusion'],
++  },
+ 
+   proxy: { label: 'Proxy', group: 'proxy', type: 'scalar', menu: 'proxy' },
+ 
+diff --git a/packages/frontend/src/components/menu/miscellaneous/_components/badge-packs.tsx b/packages/frontend/src/components/menu/miscellaneous/_components/badge-packs.tsx
+new file mode 100644
+index 00000000..e73ef04e
+--- /dev/null
++++ b/packages/frontend/src/components/menu/miscellaneous/_components/badge-packs.tsx
+@@ -0,0 +1,110 @@
++import { useState } from 'react';
++import { useUserData } from '@/context/userData';
++import { SettingsCard } from '../../../shared/settings-card';
++import { TextInput } from '@aiostreams/ui/text-input';
++import { Button } from '@aiostreams/ui/button';
++import { IconButton } from '@aiostreams/ui/button';
++import { BiTrash, BiPlus } from 'react-icons/bi';
++
++const DEFAULT_PACK =
++  'https://raw.githubusercontent.com/kingsizew/badges/main/white_badges.json';
++
++function isHttpUrl(value: string) {
++  try {
++    const url = new URL(value.trim());
++    return url.protocol === 'http:' || url.protocol === 'https:';
++  } catch {
++    return false;
++  }
++}
++
++/** Badge pack JSON URLs saved on the user config and published via System/Info. */
++export function BadgePacks() {
++  const { userData, setUserData } = useUserData();
++  const packs = userData.badgePackUrls ?? [];
++  const [draft, setDraft] = useState('');
++  const [error, setError] = useState<string | null>(null);
++
++  const addPack = (raw: string) => {
++    const url = raw.trim();
++    if (!url) return;
++    if (!isHttpUrl(url)) {
++      setError('Enter a valid http(s) URL to a badge pack JSON file.');
++      return;
++    }
++    if (packs.includes(url)) {
++      setError('That pack URL is already listed.');
++      return;
++    }
++    setError(null);
++    setUserData((prev) => ({
++      ...prev,
++      badgePackUrls: [...(prev.badgePackUrls ?? []), url],
++    }));
++    setDraft('');
++  };
++
++  const removeAt = (index: number) => {
++    setUserData((prev) => ({
++      ...prev,
++      badgePackUrls: (prev.badgePackUrls ?? []).filter((_, i) => i !== index),
++    }));
++  };
++
++  return (
++    <SettingsCard
++      title="Badge Pack URLs"
++      id="badgePackUrls"
++      description="Import Fusion/Nuvio or AIOStreams badge-pack JSON URLs. Saved with your config. Custom apps (not Stremio) fetch these and draw logos from stream filenames. Save & Install after changing."
++    >
++      <div className="flex flex-col gap-3">
++        <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
++          <div className="flex-1">
++            <TextInput
++              label="Pack JSON URL"
++              type="url"
++              value={draft}
++              placeholder={DEFAULT_PACK}
++              onValueChange={(value: string) => {
++                setDraft(value);
++                setError(null);
++              }}
++            />
++          </div>
++          <Button
++            intent="primary-subtle"
++            onClick={() => addPack(draft)}
++            className="shrink-0"
++          >
++            <BiPlus className="w-4 h-4" />
++            Import
++          </Button>
++        </div>
++        {error && <p className="text-sm text-red-400">{error}</p>}
++        <Button intent="gray-outline" onClick={() => addPack(DEFAULT_PACK)}>
++          Add Kingsize white pack
++        </Button>
++        {packs.length === 0 ? (
++          <p className="text-sm text-[--muted]">No badge packs imported yet.</p>
++        ) : (
++          <ul className="flex flex-col gap-2">
++            {packs.map((url, index) => (
++              <li
++                key={url}
++                className="flex items-center gap-2 rounded-md border border-[--border] px-3 py-2 text-sm break-all"
++              >
++                <span className="flex-1 font-mono text-xs">{url}</span>
++                <IconButton
++                  icon={<BiTrash />}
++                  intent="alert-subtle"
++                  onClick={() => removeAt(index)}
++                  aria-label="Remove pack"
++                />
++              </li>
++            ))}
++          </ul>
++        )}
++      </div>
++    </SettingsCard>
++  );
++}
+diff --git a/packages/frontend/src/components/menu/miscellaneous/index.tsx b/packages/frontend/src/components/menu/miscellaneous/index.tsx
+index 3a0598c7..528acc1f 100644
+--- a/packages/frontend/src/components/menu/miscellaneous/index.tsx
++++ b/packages/frontend/src/components/menu/miscellaneous/index.tsx
+@@ -8,9 +8,11 @@ import { FiSettings, FiLink, FiLayers, FiActivity } from 'react-icons/fi';
+ import { BackgroundOptimization } from './_components/background-optimization';
+ import { PlaybackBehavior } from './_components/playback-behavior';
+ import { DisplayDebug } from './_components/display-debug';
++import { BadgePacks } from './_components/badge-packs';
+ import { ParentConfig } from './_components/parent-config';
+ import { Variants } from './_components/variants';
+ import { HealthChecks } from './_components/health-checks';
++import { MdLocalOffer } from 'react-icons/md';
+ 
+ export function MiscellaneousMenu() {
+   return (
+@@ -85,6 +87,12 @@ function Content() {
+                 </div>
+               ),
+           },
++          {
++            value: 'badges',
++            label: 'Badge Packs',
++            icon: <MdLocalOffer className="w-4 h-4" />,
++            content: <BadgePacks />,
++          },
+           {
+             value: 'parent',
+             label: 'Parent Config',
+diff --git a/packages/server/src/routes/api/user.ts b/packages/server/src/routes/api/user.ts
+index 20f56ec2..bc136410 100644
+--- a/packages/server/src/routes/api/user.ts
++++ b/packages/server/src/routes/api/user.ts
+@@ -106,6 +106,60 @@ router.head('/', async (req, res, next) => {
+   }
+ });
+ 
++/**
++ * Badge pack URLs saved on the configure page.
++ * Auth: same Basic uuid:password as GET /api/v1/user.
++ */
++router.get('/badge-packs', async (req, res, next) => {
++  let creds;
++  try {
++    creds = await resolveConfigCredentials(req, res, { allowEncrypted: false });
++  } catch (error) {
++    next(error);
++    return;
++  }
++  if (!creds) {
++    next(
++      new APIError(
++        constants.ErrorCode.MISSING_REQUIRED_FIELDS,
++        undefined,
++        'Authorization header (Basic) is required'
++      )
++    );
++    return;
++  }
++  try {
++    const userData = await UserRepository.getUser(creds.uuid, creds.password);
++    const fromUser = (userData?.badgePackUrls as string[] | undefined) ?? [];
++    const fromInstance = appConfig.jellyfin.defaultBadgePackUrls ?? [];
++    const urls = [...fromUser, ...fromInstance].filter(
++      (url, index, all) =>
++        typeof url === 'string' &&
++        /^https?:\/\//i.test(url) &&
++        all.indexOf(url) === index
++    );
++    res.status(200).json(
++      createResponse({
++        success: true,
++        detail: 'Badge pack URLs retrieved successfully',
++        data: { urls },
++      })
++    );
++  } catch (error: any) {
++    if (error instanceof APIError) {
++      next(error);
++    } else {
++      next(
++        new APIError(
++          constants.ErrorCode.INTERNAL_SERVER_ERROR,
++          undefined,
++          error.message
++        )
++      );
++    }
++  }
++});
++
+ // getting user details
+ router.get('/', async (req, res, next) => {
+   let creds;
+-- 
+2.54.0 (Apple Git-157)
+

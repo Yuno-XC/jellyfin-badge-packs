@@ -1,0 +1,152 @@
+From 6249f75a568863b7e1c1cc0d6d860f366ab6bbf9 Mon Sep 17 00:00:00 2001
+From: Yuno <Challa.somesh@gmail.com>
+Date: Tue, 20 Oct 2026 01:52:19 +0530
+Subject: [PATCH 1/3] feat: publish default badge pack URLs on Jellyfin
+ System/Info
+
+Add JELLYFIN_DEFAULT_BADGE_PACK_URLS and expose them as
+aiostreams.defaultBadgePacks so Jellyfin clients can discover pack JSON.
+---
+ packages/core/src/config/schema/jellyfin.ts   | 22 ++++++++++++++++++-
+ packages/server/src/routes/jellyfin/system.ts | 10 +++++++++
+ .../web/src/components/version-badges.tsx     | 14 ++++++++++--
+ packages/web/src/lib/server-info.ts           |  9 ++++++++
+ 4 files changed, 52 insertions(+), 3 deletions(-)
+
+diff --git a/packages/core/src/config/schema/jellyfin.ts b/packages/core/src/config/schema/jellyfin.ts
+index 3d5c90b6..6e3f5d97 100644
+--- a/packages/core/src/config/schema/jellyfin.ts
++++ b/packages/core/src/config/schema/jellyfin.ts
+@@ -1,6 +1,11 @@
+ import { z } from 'zod';
+ import * as constants from '../../utils/constants.js';
+-import { seconds, byteSize, optionalUrlString } from './helpers.js';
++import {
++  seconds,
++  byteSize,
++  optionalUrlString,
++  urlOrUrlList,
++} from './helpers.js';
+ import type { RuntimeConfigSection } from '../types.js';
+ 
+ /**
+@@ -287,4 +292,19 @@ export const jellyfinSchema = {
+     secret: false,
+     ui: { min: 0 },
+   },
++  /**
++   * Instance-wide badge pack URLs the web app loads when a user has not set
++   * their own packs under Settings → Playback → Versions.
++   */
++  defaultBadgePackUrls: {
++    schema: urlOrUrlList,
++    default: [] as string[],
++    label: 'Default badge pack URLs',
++    description:
++      'Badge pack JSON URLs for the AIOStreams web app. When a user has no pack links of their own, the app loads these automatically. Also published on Jellyfin System/Info as aiostreams.defaultBadgePacks. Does not affect Stremio. Accepts one URL, a JSON array, or a list in the dashboard.',
++    env: 'JELLYFIN_DEFAULT_BADGE_PACK_URLS',
++    requiresRestart: false,
++    secret: false,
++    ui: { kind: 'list' },
++  },
+ } as const satisfies RuntimeConfigSection;
+diff --git a/packages/server/src/routes/jellyfin/system.ts b/packages/server/src/routes/jellyfin/system.ts
+index 94109b26..11a9c0a0 100644
+--- a/packages/server/src/routes/jellyfin/system.ts
++++ b/packages/server/src/routes/jellyfin/system.ts
+@@ -87,6 +87,16 @@ export async function publicInfo(req: Request) {
+         channel: appConfig.bootstrap.channel,
+         commit: appConfig.bootstrap.gitCommit,
+       },
++      // User config packs first, then instance defaults.
++      defaultBadgePacks: [
++        ...((config?.badgePackUrls as string[] | undefined) ?? []),
++        ...(appConfig.jellyfin.defaultBadgePackUrls ?? []),
++      ].filter(
++        (url, index, all) =>
++          typeof url === 'string' &&
++          /^https?:\/\//i.test(url) &&
++          all.indexOf(url) === index
++      ),
+     },
+     Version: appConfig.jellyfin.version,
+     ProductName: JELLYFIN_PRODUCT_NAME,
+diff --git a/packages/web/src/components/version-badges.tsx b/packages/web/src/components/version-badges.tsx
+index 4d613ae9..e23d1b20 100644
+--- a/packages/web/src/components/version-badges.tsx
++++ b/packages/web/src/components/version-badges.tsx
+@@ -10,6 +10,7 @@ import {
+   type CompiledBadge,
+ } from '../lib/badges';
+ import { settings, useSetting } from '../lib/settings';
++import { useServerInfo } from '../lib/server-info';
+ 
+ const HOUR_MS = 60 * 60_000;
+ 
+@@ -39,11 +40,20 @@ export const badgePackQuery = (url: string) => ({
+ const packData = (results: UseQueryResult<Badge[]>[]) =>
+   results.map((result) => result.data);
+ 
+-/** Your own badges, then each linked pack's, ready to match. */
++/**
++ * Your own badges, then each linked pack's, ready to match.
++ * When the account has no pack links, fall back to the server's
++ * `defaultBadgePacks` from public system info.
++ */
+ export function useBadges(): CompiledBadge[] {
+   const [{ links, badges }] = useSetting(settings.playback.badges);
++  const { defaultBadgePacks } = useServerInfo();
++  const effectiveLinks = React.useMemo(() => {
++    if (links.length) return links;
++    return defaultBadgePacks;
++  }, [links, defaultBadgePacks]);
+   const packs = useQueries({
+-    queries: links.map(badgePackQuery),
++    queries: effectiveLinks.map(badgePackQuery),
+     combine: packData,
+   });
+   return React.useMemo(
+diff --git a/packages/web/src/lib/server-info.ts b/packages/web/src/lib/server-info.ts
+index 7cf41b1f..28725795 100644
+--- a/packages/web/src/lib/server-info.ts
++++ b/packages/web/src/lib/server-info.ts
+@@ -35,6 +35,8 @@ export interface ServerInfo extends Branding {
+   parties: { relay: PartyRelayMode; defaultRelay: string | null } | null;
+   /** Whether the server keeps reports from the apps, and can pass them on to the developer. */
+   reports: { forward: boolean } | null;
++  /** Instance default pack URLs when the account has none of its own. */
++  defaultBadgePacks: string[];
+ }
+ 
+ export const NO_SERVER_INFO: ServerInfo = {
+@@ -48,6 +50,7 @@ export const NO_SERVER_INFO: ServerInfo = {
+   css: null,
+   parties: null,
+   reports: null,
++  defaultBadgePacks: [],
+ };
+ 
+ interface PublicSystemInfo {
+@@ -62,6 +65,7 @@ interface PublicSystemInfo {
+     parties?: ServerInfo['parties'];
+     reports?: ServerInfo['reports'];
+     version?: { tag?: string; channel?: string; commit?: string };
++    defaultBadgePacks?: string[];
+   };
+ }
+ 
+@@ -108,6 +112,11 @@ export function useServerInfoQuery(client: JellyfinClient) {
+         css: data.aiostreams?.css || null,
+         parties: data.aiostreams?.parties ?? null,
+         reports: data.aiostreams?.reports ?? null,
++        defaultBadgePacks: Array.isArray(data.aiostreams?.defaultBadgePacks)
++          ? data.aiostreams.defaultBadgePacks.filter(
++              (u): u is string => typeof u === 'string' && /^https?:\/\//i.test(u)
++            )
++          : [],
+       };
+     },
+     staleTime: 5 * 60_000,
+-- 
+2.54.0 (Apple Git-157)
+

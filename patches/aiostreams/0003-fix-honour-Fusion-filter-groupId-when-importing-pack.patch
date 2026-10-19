@@ -1,0 +1,26 @@
+From f0373cae4bda208ad56868550d7fd29d57e9d695 Mon Sep 17 00:00:00 2001
+From: Yuno <Challa.somesh@gmail.com>
+Date: Tue, 20 Oct 2026 01:52:20 +0530
+Subject: [PATCH 3/3] fix: honour Fusion filter groupId when importing packs
+
+Keep one badge per Fusion group (quality, resolution, visual, audio).
+---
+ packages/web/src/lib/badges.ts | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/packages/web/src/lib/badges.ts b/packages/web/src/lib/badges.ts
+index a312e06f..e503fb88 100644
+--- a/packages/web/src/lib/badges.ts
++++ b/packages/web/src/lib/badges.ts
+@@ -103,6 +103,8 @@ function fusionBadge(value: unknown): Badge | null {
+     color: fusionColor(value.textColor),
+     background: filled ? fusionColor(value.tagColor) : undefined,
+     border: fusionColor(value.borderColor),
++    // Fusion packs use groupId so only one badge per group shows (quality, resolution, …).
++    group: text(value.groupId) ?? text(value.group),
+   });
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

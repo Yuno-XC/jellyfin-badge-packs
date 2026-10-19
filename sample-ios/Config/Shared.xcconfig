@@ -1,0 +1,14 @@
+PRODUCT_NAME = BadgeStreamsSample
+PRODUCT_DISPLAY_NAME = Badge Streams
+PRODUCT_BUNDLE_IDENTIFIER = com.yuno.badgestreamssample
+MARKETING_VERSION = 1.0
+CURRENT_PROJECT_VERSION = 1
+
+IPHONEOS_DEPLOYMENT_TARGET = 17.0
+TARGETED_DEVICE_FAMILY = 1
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait
+INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationLandscapeRight UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown
+
+CODE_SIGN_ENTITLEMENTS = Config/BadgeStreamsSample.entitlements
