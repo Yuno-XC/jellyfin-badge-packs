@@ -1,5 +1,12 @@
+// Tests.xcconfig
+
 #include "Shared.xcconfig"
 
+// ==========================================
+// Test Target Settings
+// ==========================================
 PRODUCT_BUNDLE_IDENTIFIER = com.yuno.badgestreamssample
 TEST_TARGET_NAME = BadgeStreamsSample
+
+// Fix duplicate module name issue
 PRODUCT_MODULE_NAME = $(PRODUCT_NAME)UITests
